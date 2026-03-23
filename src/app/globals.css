@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #F4F7F4;
+  --foreground: #2A332C;
+}
+
+@layer components {
+  .gradient-text {
+    background: linear-gradient(135deg, #1DB954 0%, #151916 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .stagger-1 { animation-delay: 0.1s; }
+  .stagger-2 { animation-delay: 0.2s; }
+  .stagger-3 { animation-delay: 0.3s; }
+  .stagger-4 { animation-delay: 0.4s; }
+
+  .input-focus-glow:focus {
+    box-shadow: 0 0 15px -3px rgba(29, 185, 84, 0.3);
+    border-color: #1DB954;
+  }
+
+  .blob {
+    filter: blur(80px);
+    z-index: -1;
+  }
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s infinite linear;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}

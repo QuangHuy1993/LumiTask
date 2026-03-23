@@ -1,0 +1,13 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/app/generated/prisma
+.next/
+.cursor/
+.agents/
+Design/
+Workflow/
+Testcase/
+.DS_Store
+tsconfig.tsbuildinfo

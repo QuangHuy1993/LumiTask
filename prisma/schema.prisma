@@ -1,0 +1,796 @@
+// Prisma schema cho hệ thống quản lý việc làm cá nhân
+// PostgreSQL (Neon) + Prisma Client cho Next.js app (output vào `app/generated/prisma`)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===================== ENUMS =====================
+
+// Trạng thái đợt làm (batch)
+enum BatchStatus {
+  OPEN
+  CLOSED
+}
+
+// Trạng thái job
+enum JobStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// Mức độ ưu tiên của Job
+enum JobPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Trạng thái thanh toán cho Job
+enum PaymentStatus {
+  UNPAID // Chưa thanh toán
+  DEPOSIT_PAID // Đã thanh toán tiền cọc
+  COMPLETED // Đã thanh toán đủ
+}
+
+// Loại giao dịch (tiền vào/ra)
+enum TransactionDirection {
+  INCOMING // Tiền vào (khách trả, refund về, ...)
+  OUTGOING // Tiền ra (trả hoa hồng, chi phí, ...)
+}
+
+// Trạng thái giao dịch
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// Loại AI provider
+enum AIProvider {
+  OPENAI
+  GROQ
+  ANTHROPIC
+  CUSTOM
+}
+
+// Loại action cho audit log (tối giản, có thể mở rộng sau)
+enum AuditAction {
+  AUTH_LOGIN_SUCCESS
+  AUTH_LOGIN_FAILED
+  AUTH_LOGOUT
+  AUTH_2FA_ENABLED
+  AUTH_2FA_DISABLED
+  AUTH_PASSWORD_CHANGED
+
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_DELETED
+
+  SUBJECT_CREATED
+  SUBJECT_UPDATED
+  SUBJECT_DELETED
+
+  JOB_CREATED
+  JOB_UPDATED
+  JOB_DELETED
+
+  TRANSACTION_CREATED
+  TRANSACTION_UPDATED
+  TRANSACTION_DELETED
+
+  SETTING_UPDATED
+  AI_REQUEST
+
+  TRADING_CONTACT_CREATED
+  TRADING_CONTACT_UPDATED
+  TRADING_CONTACT_DELETED
+
+  TRADING_CATEGORY_CREATED
+  TRADING_CATEGORY_UPDATED
+  TRADING_CATEGORY_DELETED
+
+  TRADING_SUBSCRIPTION_CREATED
+  TRADING_SUBSCRIPTION_UPDATED
+  TRADING_SUBSCRIPTION_DELETED
+  TRADING_SUBSCRIPTION_RENEWED
+  TRADING_SUBSCRIPTION_TOGGLED_ACTIVE
+
+  TRADING_REMINDER_MARKED
+}
+
+enum AttachmentOwnerType {
+  JOB
+  CLIENT
+}
+
+// ===================== MODELS =====================
+
+// 1. Bảng User (Đăng nhập)
+model User {
+  id       Int    @id @default(autoincrement())
+  username String @unique
+  password String // Nên lưu hash (bcrypt, argon2, ...)
+
+  // Thông tin thêm để mở rộng sau này
+  email    String? @unique
+  fullName String?
+  isActive Boolean @default(true)
+
+  jobs                Job[]
+  clients             Client[]
+  saleContacts        SaleContact[]
+  serviceCategories   ServiceCategory[]
+  subscriptions       Subscription[]
+  bankAccounts        BankAccount[]
+  aiSettings          AISetting[]
+  sessions            Session[]
+  twoFactor           UserTwoFactor?
+  recoveryCodes       TwoFactorRecoveryCode[]
+  passwordResetTokens PasswordResetToken[]
+  auditLogs           AuditLog[]
+  attachments         Attachment[]
+  aiRequestLogs       AIRequestLog[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+  deletedAt   DateTime? // Soft delete — null = active, có giá trị = đã xoá
+
+  transactions Transaction[]
+  appSettings  AppSetting[]
+
+  @@index([deletedAt])
+}
+
+// Session đăng nhập (đủ để revoke, multi-device, theo dõi IP/UA)
+model Session {
+  id     Int    @id @default(autoincrement())
+  token  String @unique
+  userId Int
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  ipAddress String?
+  userAgent String?
+
+  @@index([userId, expiresAt])
+}
+
+// Token reset mật khẩu (hash token để an toàn)
+model PasswordResetToken {
+  id     Int  @id @default(autoincrement())
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+// 2FA TOTP (dùng được với Microsoft Authenticator / Google Authenticator)
+model UserTwoFactor {
+  id     Int  @id @default(autoincrement())
+  userId Int  @unique
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Lưu secret dạng đã mã hoá (khuyến nghị) hoặc ở mức tối thiểu là base32.
+  // Nếu bạn muốn "chuẩn enterprise", tôi sẽ thêm encryption layer ở app level.
+  totpSecret String  @db.Text
+  isEnabled  Boolean @default(false)
+
+  createdAt      DateTime  @default(now())
+  lastVerifiedAt DateTime?
+}
+
+// Recovery codes cho 2FA (lưu dạng hash, mỗi code dùng 1 lần)
+model TwoFactorRecoveryCode {
+  id     Int  @id @default(autoincrement())
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash  String
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+
+  @@unique([userId, codeHash])
+  @@index([userId, usedAt])
+}
+
+// Audit log cho mọi hành động quan trọng (phục vụ thống kê + truy vết)
+model AuditLog {
+  id     Int         @id @default(autoincrement())
+  action AuditAction
+
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Entity bị tác động (không ép FK để linh hoạt)
+  entityType String?
+  entityId   String?
+
+  ipAddress String?
+  userAgent String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+}
+
+// 2. Bảng Ngân hàng
+model BankAccount {
+  id          Int     @id @default(autoincrement())
+  bankId      String // Mã ngân hàng (VD: TCB, VCB, ...)
+  accountNo   String // Số tài khoản
+  accountName String // Tên chủ tài khoản
+  logoURL     String?
+  isDefault   Boolean @default(false)
+
+  // (Optional) chủ sở hữu tài khoản, để sau có multi-user vẫn dùng được
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  transactions Transaction[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@unique([bankId, accountNo])
+  @@index([ownerId])
+  @@index([deletedAt])
+}
+
+// 3. Bảng Khách hàng
+model Client {
+  id    Int     @id @default(autoincrement())
+  name  String
+  zalo  String?
+  phone String?
+  email String?
+  note  String?
+
+  // Ai là người phụ trách (để sau mở rộng multi-user không vỡ)
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  jobs        Job[]
+  attachments Attachment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([name]) // Tìm theo tên
+  @@index([phone])
+  @@index([zalo])
+  @@index([ownerId])
+  @@index([deletedAt])
+}
+
+// 4. Bảng Đợt làm (Batch / Sprint)
+model WorkBatch {
+  id        Int         @id @default(autoincrement())
+  name      String
+  startDate DateTime    @default(now())
+  endDate   DateTime?
+  status    BatchStatus @default(OPEN)
+  note      String?
+
+  jobs Job[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([status, startDate])
+  @@index([deletedAt])
+}
+
+// 5. Bảng Môn học
+model Subject {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique // Ví dụ: Java, CSDL, C++, ReactJS...
+  code  String? // Ví dụ: JAVA, DB, CPP (badge ngắn gọn)
+  color String? // Hex color cho badge (ví dụ: #FF5733)
+
+  jobs Job[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([deletedAt])
+}
+
+// 6. Bảng Việc làm (Job)
+model Job {
+  id   Int    @id @default(autoincrement())
+  name String
+
+  // Liên kết batch (đợt làm)
+  batchId Int?
+  batch   WorkBatch? @relation(fields: [batchId], references: [id])
+
+  // Liên kết khách hàng
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id])
+
+  // Liên kết môn học
+  subjectId Int?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+
+  // Ai là người phụ trách job này (User)
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  status        JobStatus     @default(NOT_STARTED)
+  paymentStatus PaymentStatus @default(UNPAID)
+  priority      JobPriority   @default(MEDIUM)
+
+  startDate DateTime?
+  deadline  DateTime?
+
+  // Tiền tệ (dùng Numeric cho chính xác)
+  amount    Decimal @default(0) @db.Decimal(14, 2) // Tổng tiền phải thu
+  deposit   Decimal @default(0) @db.Decimal(14, 2) // Tiền cọc yêu cầu
+  totalPaid Decimal @default(0) @db.Decimal(14, 2) // Tổng tiền đã nhận
+  isPaid    Boolean @default(false) // Flag nhanh để filter
+
+  referrer    String? // Người giới thiệu
+  referralFee Decimal @default(0) @db.Decimal(14, 2)
+
+  note String? @db.Text
+
+  transactions Transaction[]
+  tags         JobTag[]
+  attachments  Attachment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Indexes for query optimization
+  @@index([ownerId, deletedAt, status, createdAt(sort: Desc)])
+  @@index([clientId, deletedAt, createdAt(sort: Desc)])
+  @@index([batchId, deletedAt])
+  @@index([subjectId, deletedAt])
+  @@index([name])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+// 7. Bảng Giao dịch (Webhook SePay + thủ công)
+model Transaction {
+  id              Int      @id @default(autoincrement())
+  transactionDate DateTime @default(now())
+  amount          Decimal  @db.Decimal(14, 2)
+  content         String
+  gatewayTransId  String?  @unique // ID từ SePay (nếu có)
+
+  direction TransactionDirection @default(INCOMING)
+  status    TransactionStatus    @default(COMPLETED)
+
+  // Ngân hàng nhận/chi
+  bankAccountId Int?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  // Giao dịch liên quan job nào
+  jobId Int?
+  job   Job? @relation(fields: [jobId], references: [id])
+
+  // (Optional) người thực hiện/ghi nhận giao dịch
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id])
+
+  // Dữ liệu raw từ webhook (JSON, nội dung gốc)
+  rawPayload String? @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([jobId, deletedAt, transactionDate(sort: Desc)])
+  @@index([bankAccountId, deletedAt, transactionDate(sort: Desc)])
+  @@index([userId, transactionDate])
+  @@index([deletedAt])
+}
+
+// 8. Bảng cấu hình AI (dùng cho GROQ / OpenAI / ... )
+model AISetting {
+  id Int @id @default(autoincrement())
+
+  // Tên profile cấu hình (VD: "GROQ - thống kê", "GPT4o - chat")
+  name String
+
+  provider AIProvider
+  model    String // Tên model cụ thể (VD: llama-3.1-70b, gpt-4.1, ...)
+
+  // Tuỳ chọn kết nối
+  baseUrl String? // Với GROQ hay custom endpoint
+  apiKey  String? // Có thể bỏ trống nếu dùng ENV, hoặc lưu token riêng (cân nhắc mã hoá)
+
+  temperature Float? @db.DoublePrecision
+  maxTokens   Int?
+
+  // Đánh dấu profile đang active / default
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  // (Optional) gắn với User nếu sau này có multi-user
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  description String?
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  airequestLogs AIRequestLog[]
+
+  @@index([provider, model])
+  @@index([isDefault, isActive])
+}
+
+// Log request AI để sau thống kê chi phí/usage, hoặc debug
+model AIRequestLog {
+  id Int @id @default(autoincrement())
+
+  provider AIProvider
+  model    String
+
+  // optional link: dùng profile nào
+  aiSettingId Int?
+  aiSetting   AISetting? @relation(fields: [aiSettingId], references: [id], onDelete: SetNull)
+
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Không lưu full prompt nếu sợ lộ data; có thể lưu preview + hash
+  inputPreview  String? @db.Text
+  outputPreview String? @db.Text
+  inputHash     String?
+
+  tokensIn  Int?
+  tokensOut Int?
+  latencyMs Int?
+  costUsd   Decimal? @db.Decimal(14, 6)
+
+  createdAt DateTime @default(now())
+
+  @@index([provider, model, createdAt])
+  @@index([aiSettingId, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+// Key-value settings chung cho app (ngoài AISetting)
+model AppSetting {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  value       String  @db.Text
+  description String?
+
+  updatedById Int?
+  updatedBy   User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// Tag để phân loại job (many-to-many qua JobTag)
+model Tag {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique
+  color String?
+
+  jobs JobTag[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  @@index([deletedAt])
+}
+
+model JobTag {
+  jobId Int
+  job   Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  tagId Int
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([jobId, tagId])
+  @@index([tagId])
+}
+
+// ===================== TRADING (Quản lý mua bán) =====================
+
+enum SaleContactMethod {
+  ZALO
+  FACEBOOK
+}
+
+enum SaleContactStatus {
+  ACTIVE
+  PAUSED
+  DORMANT
+}
+
+enum SubscriptionUsageMode {
+  PERSONAL_FAMILY
+  RESELL
+}
+
+enum SubscriptionBillingCycle {
+  MONTHLY
+  YEARLY
+  ONE_TIME
+  CUSTOM
+}
+
+enum SubscriptionReminderChannel {
+  EMAIL
+}
+
+enum SubscriptionReminderStage {
+  LEAD
+  AFTER
+}
+
+enum SubscriptionReminderStatus {
+  READY_TO_SEND
+  SENT
+  FAILED
+}
+
+enum SubscriptionReminderAudience {
+  OWNER
+  BUYER
+  ADMIN
+}
+
+enum EmailProvider {
+  RESEND
+}
+
+// 1) SaleContact — tệp liên hệ (Zalo/Facebook/email) cho RESELL
+model SaleContact {
+  id Int @id @default(autoincrement())
+
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  name           String
+  contactMethod SaleContactMethod
+  zalo           String?
+  facebookUrl   String?
+  email          String?
+  note           String?
+
+  status SaleContactStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  subscriptions Subscription[]
+
+  @@index([ownerId, deletedAt])
+  @@index([name])
+  @@index([zalo])
+  @@index([facebookUrl])
+  @@index([email])
+}
+
+// 2) ServiceCategory — ADMIN quản lý category dịch vụ
+model ServiceCategory {
+  id Int @id @default(autoincrement())
+
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  name      String
+  slug      String
+  sortOrder Int  @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  subscriptions Subscription[]
+
+  @@unique([ownerId, slug])
+  @@index([ownerId, deletedAt, isActive, sortOrder])
+  @@index([slug])
+}
+
+// 3) Subscription — dịch vụ/gói cần nhắc hạn + dedup 2-stage
+model Subscription {
+  id Int @id @default(autoincrement())
+
+  ownerId Int?
+  owner   User? @relation(fields: [ownerId], references: [id])
+
+  categoryId Int
+  category   ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  contactId Int?
+  contact   SaleContact? @relation(fields: [contactId], references: [id])
+
+  title String
+  usageMode SubscriptionUsageMode
+  billingCycle SubscriptionBillingCycle @default(MONTHLY)
+
+  // Mốc next important date
+  renewalOrExpiryAt DateTime
+  // Ngày bắt đầu mua/sử dụng dịch vụ (phục vụ email buyer)
+  purchaseStartAt   DateTime?
+
+  remindDaysBefore Int @default(7)
+  remindAfterExpiryDays Int @default(3)
+
+  // Dedup snapshot cho 2 stage (lead/after)
+  lastLeadReminderForRenewalAt DateTime?
+  lastAfterReminderForRenewalAt DateTime?
+  nextReminderAt DateTime?
+
+  isActive Boolean @default(true)
+
+  // Giá gói hàng cho chu kỳ renewal hiện tại
+  purchasePrice Decimal? @db.Decimal(14, 2)
+  salePrice     Decimal? @db.Decimal(14, 2)
+  currency      String   @default("VND")
+
+  notes String? @db.Text
+
+  // Thông tin tài khoản (theo yêu cầu bạn lưu plaintext)
+  youtubeAccountEmail   String?
+  netflixAccountEmail   String?
+  netflixAccountPassword String? @db.Text
+
+  reminderLogs SubscriptionReminderLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  @@index([ownerId, deletedAt, isActive, nextReminderAt(sort: Asc)])
+  @@index([ownerId, deletedAt, isActive, renewalOrExpiryAt(sort: Asc)])
+  @@index([ownerId, deletedAt, purchaseStartAt])
+  @@index([categoryId, deletedAt])
+  @@index([contactId, deletedAt])
+}
+
+// 4) SubscriptionReminderLog — lịch sử đánh dấu nhắc hạn (để debug + sau này gửi email)
+model SubscriptionReminderLog {
+  id Int @id @default(autoincrement())
+
+  subscriptionId Int
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  stage SubscriptionReminderStage
+  targetRenewalAt DateTime
+
+  channel SubscriptionReminderChannel @default(EMAIL)
+  status  SubscriptionReminderStatus
+
+  // Chưa gửi email thật ở v1, nên fields này chỉ để audit/định nghĩa trạng thái
+  sentAt DateTime?
+  errorSummary String? @db.Text
+
+  attempts SubscriptionReminderAttemptLog[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([subscriptionId, targetRenewalAt, stage])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([targetRenewalAt])
+}
+
+model SubscriptionReminderAttemptLog {
+  id Int @id @default(autoincrement())
+
+  reminderLogId Int
+  reminderLog   SubscriptionReminderLog @relation(fields: [reminderLogId], references: [id], onDelete: Cascade)
+
+  recipientEmail String
+  audience SubscriptionReminderAudience
+
+  provider EmailProvider @default(RESEND)
+  providerMessageId String?
+  idempotencyKey String
+
+  subjectSnapshot String
+  bodyHtmlSnapshot String @db.Text
+
+  status  SubscriptionReminderStatus
+  httpStatus Int?
+  errorCode String?
+  errorMessage String? @db.Text
+  retryable Boolean?
+
+  attemptedAt DateTime @default(now())
+  sentAt DateTime?
+  failedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([reminderLogId, attemptedAt(sort: Desc)])
+  @@index([recipientEmail, attemptedAt(sort: Desc)])
+  @@index([provider, providerMessageId])
+  @@index([status, attemptedAt(sort: Desc)])
+}
+
+model TradingReminderJobRun {
+  id Int @id @default(autoincrement())
+
+  triggerSource String @default("CRON")
+  timezone      String @default("Asia/Ho_Chi_Minh")
+
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  ownerCount Int @default(0)
+  processed Int @default(0)
+  markedLead Int @default(0)
+  markedAfter Int @default(0)
+  skippedDedup Int @default(0)
+  failedDueToMissingRecipients Int @default(0)
+
+  status String @default("RUNNING")
+  errorSummary String? @db.Text
+  metadata Json?
+
+  @@index([startedAt(sort: Desc)])
+  @@index([status, startedAt(sort: Desc)])
+}
+
+// File đính kèm (lưu URL, không lưu blob)
+model Attachment {
+  id        Int                 @id @default(autoincrement())
+  ownerType AttachmentOwnerType
+
+  // Chỉ 1 trong 2 sẽ có giá trị tuỳ ownerType
+  jobId    Int?
+  job      Job?    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  clientId Int?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  fileName String
+  fileUrl  String
+  fileType String?
+  fileSize Int?
+
+  uploadedById Int?
+  uploadedBy   User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([ownerType, createdAt])
+  @@index([jobId])
+  @@index([clientId])
+  @@index([uploadedById])
+}
