@@ -75,7 +75,7 @@ npm install
    cp .env.example .env
    ```
 
-   Điền `DATABASE_URL` (và các secret khác). **Không commit** file `.env`.
+   Điền `DATABASE_URL` (và các secret khác). Với Neon, nếu bạn thấy warning về `sslmode=require`, hãy giữ `sslmode=require` và thêm `uselibpqcompat=true` trong query string. **Không commit** file `.env`.
 
 2. Đồng bộ schema xuống database (dự án dùng `prisma/schema.prisma`; nếu chưa có thư mục `prisma/migrations`, dùng push cho môi trường dev):
 

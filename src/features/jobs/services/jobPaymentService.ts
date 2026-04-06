@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db/prisma";
 
 type ManualPaymentType = "DEPOSIT" | "FULL";
 
+const SYNC_SETTING_KEY = "sync_job_revenue_to_finance";
+const JOB_REVENUE_CATEGORY_SLUG = "job-revenue";
+
 function nextPaymentStatus(current: PaymentStatus, type: ManualPaymentType, newTotalPaid: Prisma.Decimal, amount: Prisma.Decimal) {
   if (type === "DEPOSIT" && current === "UNPAID") {
     return "DEPOSIT_PAID" as const;
@@ -12,6 +15,73 @@ function nextPaymentStatus(current: PaymentStatus, type: ManualPaymentType, newT
     return "COMPLETED" as const;
   }
   return current;
+}
+
+async function syncJobRevenueToFinance(tx: Prisma.TransactionClient, input: {
+  transactionId: number;
+  ownerId: number;
+  occurredAt: Date;
+  amount: Prisma.Decimal;
+  content: string;
+  jobId: number;
+}) {
+  const setting = await tx.appSetting.findUnique({
+    where: { key: SYNC_SETTING_KEY },
+    select: { value: true },
+  });
+  if (setting?.value !== "true") return;
+
+  // Idempotency: if we already created a FinanceEntry for this Transaction, skip.
+  const syncNotePrefix = `[TX:${input.transactionId}]`;
+  const existing = await tx.financeEntry.findFirst({
+    where: {
+      ownerId: input.ownerId,
+      deletedAt: null,
+      note: { startsWith: syncNotePrefix },
+    },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const wallet = await tx.financeWallet.findFirst({
+    where: { ownerId: input.ownerId, deletedAt: null },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  if (!wallet) return;
+
+  const category = await tx.financeCategory.upsert({
+    where: {
+      ownerId_slug: { ownerId: input.ownerId, slug: JOB_REVENUE_CATEGORY_SLUG },
+    },
+    create: {
+      ownerId: input.ownerId,
+      kind: "INCOME",
+      name: "Doanh thu việc làm",
+      slug: JOB_REVENUE_CATEGORY_SLUG,
+      isActive: true,
+      sortOrder: 50,
+    },
+    update: {
+      kind: "INCOME",
+      name: "Doanh thu việc làm",
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
+  await tx.financeEntry.create({
+    data: {
+      ownerId: input.ownerId,
+      walletId: wallet.id,
+      categoryId: category.id,
+      entryKind: "INCOME",
+      amount: input.amount,
+      currency: "VND",
+      occurredAt: input.occurredAt,
+      note: `${syncNotePrefix} Thu từ Job #${input.jobId} — ${input.content}`.slice(0, 5000),
+    },
+  });
 }
 
 function nextJobStatus(current: JobStatus, newPaymentStatus: PaymentStatus): JobStatus {
@@ -34,7 +104,7 @@ export const jobPaymentService = {
     return prisma.$transaction(async (tx) => {
       const job = await tx.job.findFirst({
         where: { id: input.jobId, deletedAt: null },
-        select: { id: true, amount: true, totalPaid: true, paymentStatus: true, status: true },
+        select: { id: true, ownerId: true, amount: true, totalPaid: true, paymentStatus: true, status: true },
       });
       if (!job) {
         return { ok: false as const, error: "JOB_NOT_FOUND" as const };
@@ -45,7 +115,7 @@ export const jobPaymentService = {
       const isPaid = newStatus === "COMPLETED";
       const newJobStatus = nextJobStatus(job.status, newStatus);
 
-      await tx.transaction.create({
+      const createdTx = await tx.transaction.create({
         data: {
           transactionDate: input.date,
           amount: input.amount,
@@ -56,6 +126,7 @@ export const jobPaymentService = {
           jobId: input.jobId,
           userId: input.userId,
         },
+        select: { id: true },
       });
 
       await tx.job.update({
@@ -67,6 +138,22 @@ export const jobPaymentService = {
           status: newJobStatus,
         },
       });
+
+      // Best-effort: don't fail the payment record if finance sync fails.
+      if (job.ownerId) {
+        try {
+          await syncJobRevenueToFinance(tx, {
+            transactionId: createdTx.id,
+            ownerId: job.ownerId,
+            occurredAt: input.date,
+            amount: input.amount,
+            content: input.content,
+            jobId: input.jobId,
+          });
+        } catch (e) {
+          console.error("[jobPaymentService] finance sync failed", e);
+        }
+      }
 
       return { ok: true as const };
     });
@@ -98,7 +185,7 @@ export const jobPaymentService = {
       const [job, bank] = await Promise.all([
         tx.job.findFirst({
           where: { id: jobId, deletedAt: null },
-          select: { id: true, amount: true, totalPaid: true, paymentStatus: true, status: true },
+          select: { id: true, ownerId: true, amount: true, totalPaid: true, paymentStatus: true, status: true },
         }),
         tx.bankAccount.findFirst({
           where: { accountNo: input.accountNo, deletedAt: null },
@@ -115,7 +202,7 @@ export const jobPaymentService = {
       const isPaid = newStatus === "COMPLETED";
       const newJobStatus = nextJobStatus(job.status, newStatus);
 
-      await tx.transaction.create({
+      const createdTx = await tx.transaction.create({
         data: {
           transactionDate: new Date(),
           amount: input.amount,
@@ -127,6 +214,7 @@ export const jobPaymentService = {
           jobId: job.id,
           rawPayload: input.rawPayload,
         },
+        select: { id: true },
       });
 
       await tx.job.update({
@@ -138,6 +226,21 @@ export const jobPaymentService = {
           status: newJobStatus,
         },
       });
+
+      if (job.ownerId) {
+        try {
+          await syncJobRevenueToFinance(tx, {
+            transactionId: createdTx.id,
+            ownerId: job.ownerId,
+            occurredAt: new Date(),
+            amount: input.amount,
+            content: input.content,
+            jobId: job.id,
+          });
+        } catch (e) {
+          console.error("[jobPaymentService] finance sync failed", e);
+        }
+      }
 
       return { ok: true as const };
     });

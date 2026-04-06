@@ -11,3 +11,5 @@ Workflow/
 Testcase/
 .DS_Store
 tsconfig.tsbuildinfo
+docs/
+.cache/

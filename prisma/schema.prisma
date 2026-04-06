@@ -62,6 +62,12 @@ enum AIProvider {
   CUSTOM
 }
 
+// Phân quyền người dùng
+enum UserRole {
+  OWNER   // Toàn quyền
+  LIMITED // Chỉ: payment-gen, expenses, settings
+}
+
 // Loại action cho audit log (tối giản, có thể mở rộng sau)
 enum AuditAction {
   AUTH_LOGIN_SUCCESS
@@ -105,25 +111,100 @@ enum AuditAction {
   TRADING_SUBSCRIPTION_TOGGLED_ACTIVE
 
   TRADING_REMINDER_MARKED
+
+  // Thu chi cá nhân (Finance*)
+  FINANCE_WALLET_CREATED
+  FINANCE_WALLET_UPDATED
+  FINANCE_WALLET_DELETED
+  FINANCE_CATEGORY_CREATED
+  FINANCE_CATEGORY_UPDATED
+  FINANCE_CATEGORY_DELETED
+  FINANCE_ENTRY_CREATED
+  FINANCE_ENTRY_UPDATED
+  FINANCE_ENTRY_DELETED
+  FINANCE_TAG_CREATED
+  FINANCE_TAG_UPDATED
+  FINANCE_TAG_DELETED
+  FINANCE_BUDGET_CREATED
+  FINANCE_BUDGET_UPDATED
+  FINANCE_BUDGET_DELETED
+  FINANCE_GOAL_CREATED
+  FINANCE_GOAL_UPDATED
+  FINANCE_GOAL_DELETED
+  FINANCE_RECURRING_CREATED
+  FINANCE_RECURRING_UPDATED
+  FINANCE_RECURRING_DELETED
+  FINANCE_IMPORT_STARTED
+  FINANCE_IMPORT_COMPLETED
+  FINANCE_IMPORT_FAILED
+  FINANCE_LOAN_CREATED
+  FINANCE_LOAN_UPDATED
+  FINANCE_LOAN_DELETED
 }
 
 enum AttachmentOwnerType {
   JOB
   CLIENT
+  FINANCE_ENTRY
+}
+
+// ===================== FINANCE (Thu chi ca nhan) =====================
+
+enum FinanceCategoryKind {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceEntryKind {
+  INCOME
+  EXPENSE
+  TRANSFER_OUT
+  TRANSFER_IN
+}
+
+enum FinanceEntryLifecycle {
+  PLANNED
+  POSTED
+  VOIDED
+}
+
+enum FinanceRecurringFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum FinanceImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum FinanceLoanStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum FinanceLoanDirection {
+  BORROWED
+  LENT
 }
 
 // ===================== MODELS =====================
 
 // 1. Bảng User (Đăng nhập)
 model User {
-  id       Int    @id @default(autoincrement())
-  username String @unique
-  password String // Nên lưu hash (bcrypt, argon2, ...)
+  id       Int      @id @default(autoincrement())
+  username String   @unique
+  password String   // Nên lưu hash (bcrypt, argon2, ...)
 
   // Thông tin thêm để mở rộng sau này
-  email    String? @unique
+  email    String?  @unique
   fullName String?
-  isActive Boolean @default(true)
+  isActive Boolean  @default(true)
+  role     UserRole @default(LIMITED)
 
   jobs                Job[]
   clients             Client[]
@@ -147,6 +228,16 @@ model User {
 
   transactions Transaction[]
   appSettings  AppSetting[]
+
+  financeWallets        FinanceWallet[]
+  financeCategories     FinanceCategory[]
+  financeTags           FinanceTag[]
+  financeEntries        FinanceEntry[]
+  financeBudgetPeriods  FinanceBudgetPeriod[]
+  financeSavingsGoals   FinanceSavingsGoal[]
+  financeRecurringRules FinanceRecurringRule[]
+  financeImportBatches  FinanceImportBatch[]
+  financeLoans          FinanceLoan[]
 
   @@index([deletedAt])
 }
@@ -768,16 +859,285 @@ model TradingReminderJobRun {
   @@index([status, startedAt(sort: Desc)])
 }
 
+// ===================== FINANCE MODELS (Thu chi ca nhan) =====================
+
+model FinanceWallet {
+  id        Int     @id @default(autoincrement())
+  ownerId   Int
+  owner     User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  currency  String  @default("VND")
+  icon      String?
+  sortOrder Int     @default(0)
+  isDefault Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  entries        FinanceEntry[]
+  recurringRules FinanceRecurringRule[]
+
+  @@index([ownerId, deletedAt])
+}
+
+model FinanceCategory {
+  id        Int                 @id @default(autoincrement())
+  ownerId   Int
+  owner     User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  kind      FinanceCategoryKind
+  name      String
+  slug      String
+  color     String?
+  icon      String?
+  sortOrder Int                 @default(0)
+  isActive  Boolean             @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  entries        FinanceEntry[]
+  budgetLines    FinanceBudgetCategoryLine[]
+  recurringRules FinanceRecurringRule[]
+
+  @@unique([ownerId, slug])
+  @@index([ownerId, deletedAt, kind])
+}
+
+model FinanceTag {
+  id      Int     @id @default(autoincrement())
+  ownerId Int
+  owner   User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name    String
+  color   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  entryLinks FinanceEntryTag[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId, deletedAt])
+}
+
+model FinanceEntry {
+  id                Int                   @id @default(autoincrement())
+  ownerId           Int
+  owner             User                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  walletId          Int
+  wallet            FinanceWallet         @relation(fields: [walletId], references: [id])
+  categoryId        Int?
+  category          FinanceCategory?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  entryKind         FinanceEntryKind
+  lifecycleStatus   FinanceEntryLifecycle @default(POSTED)
+  amount            Decimal               @db.Decimal(14, 2)
+  currency          String                @default("VND")
+  amountBase        Decimal?              @db.Decimal(14, 2)
+  fxRate            Decimal?              @db.Decimal(18, 8)
+  fxAsOf            DateTime?
+  occurredAt        DateTime
+  note              String?               @db.Text
+  splitGroupId      String?               @db.Uuid
+  transferPairId    String?               @db.Uuid
+  parentEntryId     Int?
+  parent            FinanceEntry?         @relation("FinanceEntrySplit", fields: [parentEntryId], references: [id], onDelete: SetNull)
+  children          FinanceEntry[]        @relation("FinanceEntrySplit")
+  recurringRuleId   Int?
+  recurringRule     FinanceRecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
+  importBatchId     Int?
+  importBatch       FinanceImportBatch?   @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tags              FinanceEntryTag[]
+  goalContributions FinanceGoalContribution[]
+  loanPayments      FinanceLoanPayment[]
+  attachments       Attachment[]
+
+  @@index([ownerId, deletedAt, occurredAt(sort: Desc)])
+  @@index([ownerId, deletedAt, walletId, occurredAt(sort: Desc)])
+  @@index([ownerId, categoryId, occurredAt])
+  @@index([splitGroupId])
+  @@index([transferPairId])
+  @@index([ownerId, entryKind, lifecycleStatus, occurredAt])
+}
+
+model FinanceEntryTag {
+  entryId Int
+  entry   FinanceEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  tagId   Int
+  tag     FinanceTag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([entryId, tagId])
+  @@index([tagId])
+}
+
+model FinanceBudgetPeriod {
+  id                 Int      @id @default(autoincrement())
+  ownerId            Int
+  owner              User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  periodKey          String // YYYY-MM
+  currency           String   @default("VND")
+  overallLimitAmount Decimal? @db.Decimal(14, 2)
+  note               String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categoryLines FinanceBudgetCategoryLine[]
+
+  @@unique([ownerId, periodKey])
+  @@index([ownerId])
+}
+
+model FinanceBudgetCategoryLine {
+  id             Int               @id @default(autoincrement())
+  budgetPeriodId Int
+  budgetPeriod   FinanceBudgetPeriod @relation(fields: [budgetPeriodId], references: [id], onDelete: Cascade)
+  categoryId     Int
+  category       FinanceCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  limitAmount    Decimal           @db.Decimal(14, 2)
+
+  @@unique([budgetPeriodId, categoryId])
+}
+
+model FinanceSavingsGoal {
+  id           Int      @id @default(autoincrement())
+  ownerId      Int
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title        String
+  icon         String? // emoji / short label hiển thị UI
+  targetAmount Decimal  @db.Decimal(14, 2)
+  currency     String   @default("VND")
+  targetDate   DateTime?
+  sortOrder    Int      @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  contributions FinanceGoalContribution[]
+
+  @@index([ownerId, deletedAt])
+}
+
+model FinanceGoalContribution {
+  id            Int              @id @default(autoincrement())
+  goalId        Int
+  goal          FinanceSavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  amount        Decimal          @db.Decimal(14, 2)
+  contributedAt DateTime         @default(now())
+  entryId       Int?
+  entry         FinanceEntry?    @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  note          String?          @db.Text
+
+  @@index([goalId, contributedAt])
+}
+
+model FinanceRecurringRule {
+  id              Int                       @id @default(autoincrement())
+  ownerId         Int
+  owner           User                      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  walletId        Int
+  wallet          FinanceWallet             @relation(fields: [walletId], references: [id])
+  categoryId      Int?
+  category        FinanceCategory?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  entryKind       FinanceEntryKind
+  frequency       FinanceRecurringFrequency
+  interval        Int                       @default(1)
+  nextRunAt       DateTime
+  amount          Decimal                   @db.Decimal(14, 2)
+  currency        String                    @default("VND")
+  note            String?                   @db.Text
+  isActive        Boolean                   @default(true)
+  lastGeneratedAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  generatedEntries FinanceEntry[]
+
+  @@index([ownerId, deletedAt, isActive, nextRunAt])
+}
+
+model FinanceImportBatch {
+  id           Int                @id @default(autoincrement())
+  ownerId      Int
+  owner        User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fileName     String
+  status       FinanceImportStatus @default(PENDING)
+  rowCount     Int?
+  errorSummary String?            @db.Text
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries FinanceEntry[]
+
+  @@index([ownerId, createdAt(sort: Desc)])
+}
+
+model FinanceLoan {
+  id              Int              @id @default(autoincrement())
+  ownerId         Int
+  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name            String
+  icon            String?
+  principalAmount Decimal          @db.Decimal(14, 2)
+  currency        String           @default("VND")
+  loanDirection   FinanceLoanDirection @default(BORROWED)
+  startDate       DateTime
+  dueDate         DateTime?
+  interestRateApr Decimal?         @db.Decimal(8, 4)
+  status          FinanceLoanStatus  @default(ACTIVE)
+  note            String?          @db.Text
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  payments FinanceLoanPayment[]
+
+  @@index([ownerId, deletedAt])
+}
+
+model FinanceLoanPayment {
+  id      Int          @id @default(autoincrement())
+  loanId  Int
+  loan    FinanceLoan  @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  amount  Decimal      @db.Decimal(14, 2)
+  principalPaid Decimal? @db.Decimal(14, 2)
+  interestPaid  Decimal? @db.Decimal(14, 2)
+  paidAt  DateTime
+  entryId Int?
+  entry   FinanceEntry? @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  note    String?      @db.Text
+  deletedAt DateTime?
+
+  @@index([loanId, paidAt])
+  @@index([loanId, deletedAt])
+}
+
 // File đính kèm (lưu URL, không lưu blob)
 model Attachment {
   id        Int                 @id @default(autoincrement())
   ownerType AttachmentOwnerType
 
-  // Chỉ 1 trong 2 sẽ có giá trị tuỳ ownerType
+  // Chỉ 1 trong các FK tuỳ ownerType (JOB / CLIENT / FINANCE_ENTRY)
   jobId    Int?
   job      Job?    @relation(fields: [jobId], references: [id], onDelete: Cascade)
   clientId Int?
   client   Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  financeEntryId Int?
+  financeEntry   FinanceEntry? @relation(fields: [financeEntryId], references: [id], onDelete: Cascade)
 
   fileName String
   fileUrl  String
@@ -792,5 +1152,6 @@ model Attachment {
   @@index([ownerType, createdAt])
   @@index([jobId])
   @@index([clientId])
+  @@index([financeEntryId])
   @@index([uploadedById])
 }

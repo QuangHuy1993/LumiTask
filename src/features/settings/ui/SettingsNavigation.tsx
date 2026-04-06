@@ -3,11 +3,13 @@
 // Force re-compile to resolve onTabChange caching issues
 import React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { UserRole } from "@/lib/auth/session";
 
 type SettingsTab = 'account' | 'billing' | 'sessions' | 'app';
 
 interface SettingsNavigationProps {
   activeTab: SettingsTab;
+  role: UserRole;
 }
 
 const navItems: { label: string; value: SettingsTab }[] = [
@@ -17,9 +19,14 @@ const navItems: { label: string; value: SettingsTab }[] = [
   { label: "Cài đặt ứng dụng", value: 'app' },
 ];
 
-export function SettingsNavigation({ activeTab }: SettingsNavigationProps) {
+export function SettingsNavigation({ activeTab, role }: SettingsNavigationProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const visibleItems = React.useMemo(() => {
+    if (role === "OWNER") return navItems;
+    return navItems.filter((i) => i.value !== "app");
+  }, [role]);
 
   const handleTabChange = (tab: SettingsTab) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -29,7 +36,7 @@ export function SettingsNavigation({ activeTab }: SettingsNavigationProps) {
 
   return (
     <nav className="w-full md:w-64 space-y-2">
-      {navItems.map((item) => (
+      {visibleItems.map((item) => (
         <button
           key={item.value}
           onClick={() => handleTabChange(item.value)}

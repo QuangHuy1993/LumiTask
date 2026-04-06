@@ -3,7 +3,7 @@
 import { sessionService } from "@/lib/auth/session";
 import { appSettingService } from "@/features/settings/services/appSettingService";
 import { appSettingSchema, aiSettingSchema } from "@/features/settings/model/settingsValidation";
-import { SettingsResult, SettingsError } from "@/features/settings/model/settingsTypes";
+import { SettingsResult } from "@/features/settings/model/settingsTypes";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -18,10 +18,15 @@ export async function upsertAppSettingAction(data: unknown): Promise<SettingsRes
     const validated = appSettingSchema.safeParse(data);
     if (!validated.success) return { success: false, error: "VALIDATION_ERROR" };
 
+    // Restrict sensitive toggles to OWNER only.
+    if (validated.data.key === "sync_job_revenue_to_finance" && user.role !== "OWNER") {
+      return { success: false, error: "FORBIDDEN" };
+    }
+
     await appSettingService.upsertAppSetting(user.id, validated.data);
     revalidatePath("/settings");
     return { success: true };
-  } catch (error) {
+  } catch {
     return { success: false, error: "DB_ERROR" };
   }
 }
@@ -91,7 +96,7 @@ export async function upsertAISettingAction(data: unknown): Promise<SettingsResu
     await appSettingService.upsertAISetting(user.id, validated.data);
     revalidatePath("/settings");
     return { success: true };
-  } catch (error) {
+  } catch {
     return { success: false, error: "DB_ERROR" };
   }
 }

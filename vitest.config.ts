@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: [
       path.resolve(__dirname, "Testcase/**/*.test.ts"),
+      path.resolve(__dirname, "src/**/*.test.ts"),
     ],
   },
   resolve: {

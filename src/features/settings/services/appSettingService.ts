@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db/prisma";
-import { SettingsError } from "../model/settingsTypes";
 import { appSettingSchema, aiSettingSchema } from "../model/settingsValidation";
 import { z } from "zod";
 
@@ -18,10 +17,6 @@ export const appSettingService = {
    */
   async upsertAppSetting(userId: number, data: z.infer<typeof appSettingSchema>) {
     return prisma.$transaction(async (tx) => {
-      const existing = await tx.appSetting.findUnique({
-        where: { key: data.key },
-      });
-
       const result = await tx.appSetting.upsert({
         where: { key: data.key },
         create: {
@@ -43,8 +38,7 @@ export const appSettingService = {
           action: "SETTING_UPDATED",
           userId,
           metadata: { 
-            key: data.key, 
-            previousValue: existing?.value 
+            key: data.key,
           },
         },
       });
@@ -127,22 +121,46 @@ export const appSettingService = {
         where: { ownerId: userId, name: data.name },
       });
 
+      const emptyOptional = (v: string | undefined | null) =>
+        v == null || String(v).trim() === "";
+
       if (existing) {
+        const mergedApiKey =
+          !emptyOptional(data.apiKey) ? String(data.apiKey).trim() : existing.apiKey;
+        const baseUrl =
+          emptyOptional(data.baseUrl) ? null : String(data.baseUrl).trim();
+
         return tx.aISetting.update({
           where: { id: existing.id },
           data: {
-            ...data,
+            name: data.name,
+            provider: data.provider,
+            model: data.model.trim(),
+            baseUrl,
+            apiKey: mergedApiKey,
+            temperature: data.temperature ?? null,
+            maxTokens: data.maxTokens ?? null,
+            isDefault: data.isDefault ?? false,
+            isActive: data.isActive ?? true,
             updatedAt: new Date(),
           },
         });
-      } else {
-        return tx.aISetting.create({
-          data: {
-            ...data,
-            ownerId: userId,
-          },
-        });
       }
+
+      return tx.aISetting.create({
+        data: {
+          name: data.name,
+          provider: data.provider,
+          model: data.model.trim(),
+          baseUrl: emptyOptional(data.baseUrl) ? null : String(data.baseUrl).trim(),
+          apiKey: emptyOptional(data.apiKey) ? null : String(data.apiKey).trim(),
+          temperature: data.temperature ?? null,
+          maxTokens: data.maxTokens ?? null,
+          isDefault: data.isDefault ?? false,
+          isActive: data.isActive ?? true,
+          ownerId: userId,
+        },
+      });
     });
   },
 };

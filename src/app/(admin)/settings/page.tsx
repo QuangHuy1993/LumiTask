@@ -23,7 +23,11 @@ export default async function SettingsPage({
   if (!user) redirect("/login");
 
   const resolvedParams = await searchParams;
-  const activeTab = (resolvedParams.tab as SettingsTab) || 'account';
+  const requestedTab = (resolvedParams.tab as SettingsTab) || 'account';
+  const allowedTabs: SettingsTab[] = user.role === "OWNER"
+    ? ["account", "billing", "sessions", "app"]
+    : ["account", "billing", "sessions"];
+  const activeTab = allowedTabs.includes(requestedTab) ? requestedTab : "account";
   const page = Number(resolvedParams.page) || 1;
 
   const renderContent = async () => {
@@ -53,6 +57,7 @@ export default async function SettingsPage({
         const normalizedAISettings = aiSettings.map((s) => ({
           ...s,
           temperature: s.temperature ?? 0.7,
+          maxTokens: s.maxTokens ?? 4096,
         }));
         return <AppSettingsPane initialSettings={settings} initialAISettings={normalizedAISettings} />;
       }
@@ -82,7 +87,7 @@ export default async function SettingsPage({
 
       <div className="flex flex-col md:flex-row gap-8 flex-1 overflow-hidden">
         {/* Settings Sub-Sidebar */}
-        <SettingsNavigation activeTab={activeTab} />
+        <SettingsNavigation activeTab={activeTab} role={user.role} />
 
         {/* Settings Content Area */}
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar pb-10">

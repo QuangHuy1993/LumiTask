@@ -40,6 +40,56 @@
   .animate-shimmer {
     animation: shimmer 2s infinite linear;
   }
+
+  /* Thanh cuộn mỏng, màu primary (mint) — dùng cho grid danh mục, v.v. */
+  .scrollbar-primary-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(29, 185, 84, 0.55) rgba(29, 185, 84, 0.1);
+  }
+
+  .scrollbar-primary-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scrollbar-primary-thin::-webkit-scrollbar-track {
+    background: rgba(29, 185, 84, 0.08);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-primary-thin::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.45);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-primary-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(29, 185, 84, 0.72);
+  }
+
+  /* Alias cho các chỗ đã dùng tên cũ */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(29, 185, 84, 0.55) rgba(29, 185, 84, 0.1);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(29, 185, 84, 0.08);
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(29, 185, 84, 0.45);
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(29, 185, 84, 0.72);
+  }
 }
 
 body {

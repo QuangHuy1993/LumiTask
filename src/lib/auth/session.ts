@@ -1,13 +1,17 @@
 import { cache } from "react";
 
+import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { cookies } from "next/headers";
+
+export type { UserRole };
 
 export type UserSessionDTO = {
   id: number;
   username: string;
   email: string | null;
   fullName: string | null;
+  role: UserRole;
 };
 
 const getCurrentUserCached = cache(async (): Promise<UserSessionDTO | null> => {
@@ -28,6 +32,7 @@ const getCurrentUserCached = cache(async (): Promise<UserSessionDTO | null> => {
           fullName: true,
           isActive: true,
           deletedAt: true,
+          role: true,
         },
       },
     },
@@ -44,6 +49,7 @@ const getCurrentUserCached = cache(async (): Promise<UserSessionDTO | null> => {
     username: session.user.username,
     email: session.user.email,
     fullName: session.user.fullName,
+    role: session.user.role,
   };
 });
 

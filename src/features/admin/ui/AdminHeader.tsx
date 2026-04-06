@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Bell, Settings, LogOut, User, ChevronDown } from "lucide-react";
+import { Search, Bell, Settings, LogOut, User, ChevronDown, Menu } from "lucide-react";
 import { logoutAction } from "@/features/auth/actions/logoutAction";
 import Link from "next/link";
 
@@ -12,6 +12,7 @@ interface AdminHeaderProps {
     username: string;
     email: string | null;
   };
+  onMenuClick?: () => void;
 }
 
 interface HeaderNotification {
@@ -20,7 +21,7 @@ interface HeaderNotification {
   content: string;
 }
 
-export function AdminHeader({ user }: AdminHeaderProps) {
+export function AdminHeader({ user, onMenuClick }: AdminHeaderProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
@@ -67,8 +68,18 @@ export function AdminHeader({ user }: AdminHeaderProps) {
     .slice(0, 2);
 
   return (
-    <header className="sticky top-0 z-50 flex h-16 items-center justify-between bg-white/80 backdrop-blur-md border-b border-moss-200 px-6">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-50 flex h-16 items-center justify-between bg-white/80 backdrop-blur-md border-b border-moss-200 px-4 lg:px-6">
+      <div className="flex items-center gap-2 lg:gap-3">
+        {/* Mobile hamburger */}
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="p-2 rounded-xl text-moss-600 hover:bg-moss-100 transition-colors lg:hidden"
+            aria-label="Mở menu"
+          >
+            <Menu className="size-5" />
+          </button>
+        )}
         {/* Synced Logo Icon from Login */}
         <Link href="/dashboard" className="flex items-center gap-3 group">
           <motion.div
@@ -85,7 +96,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
             </div>
           </motion.div>
           
-          <div className="relative overflow-hidden">
+          <div className="relative overflow-hidden hidden sm:block">
             <h1 className="text-2xl font-bold tracking-tight text-moss-900 relative py-1">
               <span className="relative z-10 [text-shadow:0_0_10px_rgba(29,185,84,0.4)]">
                 Lumi<span className="text-primary">Task</span>
@@ -101,7 +112,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
         </Link>
       </div>
 
-      <div className="flex items-center gap-4 flex-1 justify-end max-w-4xl px-8">
+      <div className="flex items-center gap-1 sm:gap-4 flex-1 justify-end max-w-4xl px-0 sm:px-8">
         <div className="relative w-full max-w-md hidden md:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-moss-400 size-5" />
           <input
@@ -168,25 +179,25 @@ export function AdminHeader({ user }: AdminHeaderProps) {
           </AnimatePresence>
         </div>
         
-        <Link href="/settings" className="p-2 text-moss-600 hover:bg-moss-100 rounded-lg transition-colors">
+        <Link href="/settings" className="p-2 text-moss-600 hover:bg-moss-100 rounded-lg transition-colors hidden sm:block">
           <Settings className="size-5" />
         </Link>
         
-        <div className="h-8 w-px bg-moss-200 mx-1"></div>
+        <div className="h-8 w-px bg-moss-200 mx-1 hidden sm:block"></div>
         
         <div className="relative" ref={dropdownRef}>
           <button 
             onClick={() => setShowDropdown(!showDropdown)}
-            className="flex items-center gap-3 p-1.5 pr-3 hover:bg-moss-100 rounded-2xl transition-all active:scale-[0.98]"
+            className="flex items-center gap-2 sm:gap-3 p-1 sm:p-1.5 sm:pr-3 hover:bg-moss-100 rounded-2xl transition-all active:scale-[0.98]"
           >
-            <div className="w-10 h-10 rounded-xl bg-primary/10 border-2 border-primary/20 flex items-center justify-center text-primary font-bold shadow-sm shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-primary/10 border-2 border-primary/20 flex items-center justify-center text-primary font-bold shadow-sm shrink-0 text-xs sm:text-sm">
               {initials}
             </div>
-            <div className="text-left hidden sm:block">
+            <div className="text-left hidden lg:block">
               <p className="text-sm font-bold text-moss-900 line-clamp-1">{user.fullName || user.username}</p>
               <p className="text-[10px] text-moss-400 uppercase font-bold tracking-widest mt-0.5">Quản trị viên</p>
             </div>
-            <ChevronDown className={`size-4 text-moss-400 transition-transform ${showDropdown ? "rotate-180" : ""}`} />
+            <ChevronDown className={`size-4 text-moss-400 transition-transform hidden sm:block ${showDropdown ? "rotate-180" : ""}`} />
           </button>
 
           <AnimatePresence>
