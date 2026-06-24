@@ -65,12 +65,64 @@ export const financeCategoryService = {
 
     if (input.skipTotalCount) {
       const rows = await findManyQ;
-      return { items: rows as FinanceCategoryListItemDTO[], totalCount: rows.length };
+      const sumsMap = new Map<number, number>();
+      if (!input.skipEntryCount && rows.length > 0) {
+        const categoryIds = rows.map((r) => r.id);
+        const sums = await prisma.financeEntry.groupBy({
+          by: ["categoryId"],
+          where: {
+            ownerId: input.ownerId,
+            deletedAt: null,
+            lifecycleStatus: "POSTED",
+            categoryId: { in: categoryIds },
+          },
+          _sum: {
+            amount: true,
+          },
+        });
+        for (const s of sums) {
+          if (s.categoryId !== null && s._sum.amount !== null) {
+            sumsMap.set(s.categoryId, Number(s._sum.amount));
+          }
+        }
+      }
+      const items = rows.map((r) => ({
+        ...r,
+        totalAmount: sumsMap.get(r.id) ?? 0,
+      })) as FinanceCategoryListItemDTO[];
+      return { items, totalCount: items.length };
     }
 
     const [rows, totalCount] = await Promise.all([findManyQ, prisma.financeCategory.count({ where })]);
 
-    return { items: rows as FinanceCategoryListItemDTO[], totalCount };
+    const sumsMap = new Map<number, number>();
+    if (!input.skipEntryCount && rows.length > 0) {
+      const categoryIds = rows.map((r) => r.id);
+      const sums = await prisma.financeEntry.groupBy({
+        by: ["categoryId"],
+        where: {
+          ownerId: input.ownerId,
+          deletedAt: null,
+          lifecycleStatus: "POSTED",
+          categoryId: { in: categoryIds },
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+      for (const s of sums) {
+        if (s.categoryId !== null && s._sum.amount !== null) {
+          sumsMap.set(s.categoryId, Number(s._sum.amount));
+        }
+      }
+    }
+
+    const items = rows.map((r) => ({
+      ...r,
+      totalAmount: sumsMap.get(r.id) ?? 0,
+    })) as FinanceCategoryListItemDTO[];
+
+    return { items, totalCount };
   },
 
   async create(input: {

@@ -17,4 +17,5 @@ export type FinanceCategoryListItemDTO = {
   sortOrder: number;
   isActive: boolean;
   _count?: { entries: number };
+  totalAmount?: number;
 };

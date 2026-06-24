@@ -90,7 +90,7 @@ export function FinanceLoansClientImpl({
       setIsLoadingLists(true);
       const [wRes, cRes] = await Promise.all([
         listWalletsAction({ limit: 200 }),
-        listFinanceCategoriesAction({ limit: 200, kind: "ALL" }),
+        listFinanceCategoriesAction({ limit: 200, isActive: true, kind: "ALL" }),
       ]);
 
       if (wRes.success) setWallets(wRes.items);

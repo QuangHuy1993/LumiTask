@@ -742,10 +742,10 @@ export function FinanceCategoriesClient() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-surface-container-low/60">
-                    {["Tên", "Slug", "Loại", "Màu", "Thứ tự", "Trạng thái", "Thao tác"].map((h, i) => (
+                    {["Tên", "Slug", "Loại", "Màu", "Thứ tự", "Tổng tiền", "Trạng thái", "Thao tác"].map((h, i) => (
                       <th
                         key={h}
-                        className={`px-6 py-4 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ${i === 6 ? "text-right" : ""}`}
+                        className={`px-6 py-4 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ${i === 7 ? "text-right" : ""}`}
                       >
                         {h}
                       </th>
@@ -795,6 +795,9 @@ export function FinanceCategoriesClient() {
                       </td>
                       <td className="px-6 py-4 font-medium text-on-surface-variant tabular-nums">
                         {String(cat.sortOrder).padStart(2, "0")}
+                      </td>
+                      <td className="px-6 py-4 font-bold text-on-surface tabular-nums text-xs">
+                        {new Intl.NumberFormat("vi-VN").format(cat.totalAmount ?? 0)} đ
                       </td>
                       <td className="px-6 py-4">
                         <div
@@ -850,6 +853,9 @@ export function FinanceCategoriesClient() {
                           className={`text-[9px] font-black uppercase tracking-widest ${cat.kind === "INCOME" ? "text-primary" : "text-tertiary"}`}
                         >
                           {cat.kind === "INCOME" ? "Thu nhập" : "Chi tiêu"}
+                        </span>
+                        <span className="text-[9px] font-bold text-on-surface-variant/60 uppercase tracking-widest">
+                          • {new Intl.NumberFormat("vi-VN").format(cat.totalAmount ?? 0)} đ
                         </span>
                         {!cat.isActive && (
                           <span className="text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">
