@@ -956,6 +956,7 @@ model FinanceEntry {
   tags              FinanceEntryTag[]
   goalContributions FinanceGoalContribution[]
   loanPayments      FinanceLoanPayment[]
+  initialLoan       FinanceLoan?          @relation("FinanceLoanInitialEntry")
   attachments       Attachment[]
 
   @@index([ownerId, deletedAt, occurredAt(sort: Desc)])
@@ -1105,6 +1106,8 @@ model FinanceLoan {
   deletedAt DateTime?
 
   payments FinanceLoanPayment[]
+  entryId  Int?                  @unique
+  entry    FinanceEntry?         @relation("FinanceLoanInitialEntry", fields: [entryId], references: [id], onDelete: SetNull)
 
   @@index([ownerId, deletedAt])
 }

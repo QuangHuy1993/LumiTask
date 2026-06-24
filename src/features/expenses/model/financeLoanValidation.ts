@@ -35,6 +35,11 @@ export const financeLoanCreateSchema = z.object({
 
   status: financeLoanStatusSchema.default("ACTIVE"),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
+
+  // Options for initial principal transaction synchronization
+  createEntry: z.boolean().default(true),
+  walletId: z.number().int().positive("Vui lòng chọn ví").optional(),
+  categoryId: z.number().int().positive("Vui lòng chọn danh mục").optional(),
 });
 
 export const financeLoanUpdateSchema = financeLoanCreateSchema.partial().extend({

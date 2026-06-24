@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useMemo, useState, useTransition } from "react";
+import React, { useMemo, useState, useTransition, useEffect } from "react";
 import { X } from "lucide-react";
 
 import type { FinanceLoanDirection } from "@/features/expenses/model/financeLoanTypes";
 import type { FinanceLoanCreateInput, FinanceLoanUpdateInput } from "@/features/expenses/model/financeLoanValidation";
 import { formatVndDigits, parseVndDigits } from "@/features/expenses/utils/vndInputFormat";
+import type { FinanceWalletListItemDTO } from "@/features/expenses/model/financeWalletTypes";
+import type { FinanceCategoryListItemDTO } from "@/features/expenses/model/financeCategoryTypes";
 
 const ICONS = ["💳", "🏦", "👤", "🚗", "🏠", "💊", "🎓", "✈️", "🛡️", "🌱", "📚", "💍"];
 
@@ -32,11 +34,15 @@ type FinanceLoanFormModel = {
 export function FinanceLoanFormModal({
   mode,
   initial,
+  wallets = [],
+  categories = [],
   onClose,
   onSave,
 }: {
   mode: "add" | "edit";
   initial?: Partial<FinanceLoanFormModel>;
+  wallets?: FinanceWalletListItemDTO[];
+  categories?: FinanceCategoryListItemDTO[];
   onClose: () => void;
   onSave: (data: FinanceLoanCreateInput | FinanceLoanUpdateInput) => Promise<void> | void;
 }) {
@@ -54,6 +60,34 @@ export function FinanceLoanFormModal({
     status: initial?.status ?? "ACTIVE",
     note: initial?.note ?? "",
   });
+
+  const [createEntry, setCreateEntry] = useState(true);
+  const defaultWallet = useMemo(() => wallets.find((w) => w.isDefault) ?? wallets[0], [wallets]);
+  const [walletId, setWalletId] = useState<number | undefined>(defaultWallet?.id);
+  const [categoryId, setCategoryId] = useState<number | undefined>(undefined);
+
+  const expectedCategoryKind = form.loanDirection === "BORROWED" ? "INCOME" : "EXPENSE";
+  const categoryOptions = useMemo(() => {
+    return categories.filter((c) => c.kind === expectedCategoryKind);
+  }, [categories, expectedCategoryKind]);
+
+  // Sync walletId if defaultWallet changes
+  useEffect(() => {
+    if (defaultWallet && !walletId) {
+      setWalletId(defaultWallet.id);
+    }
+  }, [defaultWallet, walletId]);
+
+  // Sync categoryId when expected category kind changes
+  useEffect(() => {
+    if (categoryOptions.length > 0) {
+      if (!categoryOptions.some((c) => c.id === categoryId)) {
+        setCategoryId(categoryOptions[0].id);
+      }
+    } else {
+      setCategoryId(undefined);
+    }
+  }, [categoryOptions, categoryId]);
 
   const title = mode === "add" ? "Thêm khoản nợ" : "Chỉnh sửa khoản nợ";
 
@@ -218,6 +252,66 @@ export function FinanceLoanFormModal({
               className="w-full bg-surface-container-low border-none rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 resize-none overflow-y-auto max-h-32"
             />
           </div>
+
+          {mode === "add" && (
+            <div className="lg:col-span-2 border-t border-moss-100 pt-4 mt-2">
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="checkbox"
+                  id="createEntry"
+                  checked={createEntry}
+                  onChange={(e) => setCreateEntry(e.target.checked)}
+                  className="rounded text-primary focus:ring-primary size-4"
+                />
+                <label htmlFor="createEntry" className="text-sm font-bold text-on-surface select-none cursor-pointer">
+                  Tạo giao dịch ban đầu và đồng bộ số dư ví
+                </label>
+              </div>
+
+              {createEntry && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 block">Ví thanh toán</label>
+                    <div className="grid grid-cols-2 gap-2 max-h-28 overflow-y-auto pr-1">
+                      {wallets.map((w) => (
+                        <button
+                          key={w.id}
+                          type="button"
+                          onClick={() => setWalletId(w.id)}
+                          className={`truncate px-2 py-2 rounded-xl text-[11px] font-bold transition-colors border-2 box-border ${
+                            walletId === w.id ? "border-primary bg-primary/15 text-primary" : "border-transparent bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-2 block">Danh mục giao dịch</label>
+                    <div className="grid grid-cols-2 gap-2 max-h-28 overflow-y-auto pr-1">
+                      {categoryOptions.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setCategoryId(c.id)}
+                          className={`truncate px-2 py-2 rounded-xl text-[11px] font-bold transition-colors border-2 box-border text-left ${
+                            categoryId === c.id
+                              ? "border-primary bg-primary/15 text-primary"
+                              : "border-transparent bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
+                          }`}
+                        >
+                          <span className="mr-1.5">{c.icon ?? "💰"}</span>
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           </div>
         </div>
 
@@ -249,6 +343,9 @@ export function FinanceLoanFormModal({
                       interestRateApr: form.interestRateApr,
                       status: form.status,
                       note: form.note?.trim() ? form.note.trim() : "",
+                      createEntry,
+                      walletId: createEntry ? walletId : undefined,
+                      categoryId: createEntry ? categoryId : undefined,
                     } satisfies FinanceLoanCreateInput)
                   : ({
                       name: form.name.trim(),

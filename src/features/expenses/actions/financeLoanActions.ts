@@ -115,6 +115,9 @@ export async function createLoanAction(input: unknown): Promise<
     const res = await financeLoanService.createLoan(user.id, parsed.data);
     if (!res.ok) return { success: false, error: res.error };
 
+    revalidatePath(REVALIDATE_LOANS);
+    REVALIDATE_ENTRY_IMPACT_PATHS.forEach((p) => revalidatePath(p));
+
     return { success: true, item: res.item };
   } catch (err) {
     console.error("[createLoanAction]", err);
@@ -140,6 +143,9 @@ export async function updateLoanAction(loanId: number, input: unknown): Promise<
 
     const res = await financeLoanService.updateLoan(user.id, loanId, parsed.data);
     if (!res.ok) return { success: false, error: res.error };
+
+    revalidatePath(REVALIDATE_LOANS);
+    REVALIDATE_ENTRY_IMPACT_PATHS.forEach((p) => revalidatePath(p));
 
     return { success: true };
   } catch (err) {

@@ -299,6 +299,39 @@ export const financeLoanService = {
     try {
       const created = await prisma.$transaction(async (tx) => {
         const txAny = tx as any;
+
+        let createdEntryId: number | null = null;
+        if (data.createEntry && data.walletId && data.categoryId) {
+          const wallet = await txAny.financeWallet.findFirst({
+            where: { id: data.walletId, ownerId, deletedAt: null },
+            select: { id: true },
+          });
+          if (!wallet) throw new Error("WALLET_NOT_FOUND");
+
+          const expectedEntryKind = data.loanDirection === "BORROWED" ? "INCOME" : "EXPENSE";
+          const category = await txAny.financeCategory.findFirst({
+            where: { id: data.categoryId, ownerId, deletedAt: null, kind: expectedEntryKind },
+            select: { id: true },
+          });
+          if (!category) throw new Error("CATEGORY_NOT_FOUND");
+
+          const entry = await tx.financeEntry.create({
+            data: {
+              ownerId,
+              walletId: data.walletId,
+              categoryId: data.categoryId,
+              entryKind: expectedEntryKind,
+              lifecycleStatus: "POSTED",
+              amount: new Prisma.Decimal(String(data.principalAmount)),
+              currency: data.currency ?? "VND",
+              occurredAt: new Date(data.startDate),
+              note: `Giao dịch gốc khoản nợ: ${data.name.trim()}`,
+            },
+            select: { id: true },
+          });
+          createdEntryId = entry.id;
+        }
+
         const row = await txAny.financeLoan.create({
           data: {
             ownerId,
@@ -312,6 +345,7 @@ export const financeLoanService = {
             interestRateApr: data.interestRateApr === undefined ? null : new Prisma.Decimal(String(data.interestRateApr)),
             status: data.status ?? "ACTIVE",
             note: data.note?.trim() ? data.note.trim() : null,
+            entryId: createdEntryId,
           },
           select: {
             id: true,
@@ -337,6 +371,18 @@ export const financeLoanService = {
           },
         });
 
+        if (createdEntryId) {
+          await tx.auditLog.create({
+            data: {
+              action: "FINANCE_ENTRY_CREATED",
+              userId: ownerId,
+              entityType: "FinanceEntry",
+              entityId: String(createdEntryId),
+              metadata: { loanId: row.id, role: "initial_principal" },
+            },
+          });
+        }
+
         return row;
       });
 
@@ -358,7 +404,10 @@ export const financeLoanService = {
       };
 
       return { ok: true, item };
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.message === "WALLET_NOT_FOUND" || e?.message === "CATEGORY_NOT_FOUND") {
+        return { ok: false, error: e.message as FinanceLoanServiceError };
+      }
       console.error("[financeLoanService.createLoan]", e);
       return { ok: false, error: "DB_ERROR" };
     }
@@ -374,9 +423,29 @@ export const financeLoanService = {
         const txAny = tx as any;
         const existing = await txAny.financeLoan.findFirst({
           where: { id: loanId, ownerId, deletedAt: null },
-          select: { id: true },
+          select: { id: true, entryId: true, name: true, principalAmount: true, startDate: true },
         });
         if (!existing) return { ok: false as const, error: "NOT_FOUND" as const };
+
+        if (existing.entryId) {
+          const entryUpdateData: Prisma.FinanceEntryUpdateInput = {};
+          if (data.principalAmount !== undefined) {
+            entryUpdateData.amount = new Prisma.Decimal(String(data.principalAmount));
+          }
+          if (data.startDate !== undefined) {
+            entryUpdateData.occurredAt = new Date(data.startDate);
+          }
+          if (data.name !== undefined) {
+            entryUpdateData.note = `Giao dịch gốc khoản nợ: ${data.name.trim()}`;
+          }
+
+          if (Object.keys(entryUpdateData).length > 0) {
+            await tx.financeEntry.update({
+              where: { id: existing.entryId },
+              data: entryUpdateData,
+            });
+          }
+        }
 
         await txAny.financeLoan.update({
           where: { id: loanId },
@@ -423,7 +492,7 @@ export const financeLoanService = {
         const txAny = tx as any;
         const loan = await txAny.financeLoan.findFirst({
           where: { id: loanId, ownerId, deletedAt: null },
-          select: { id: true },
+          select: { id: true, entryId: true },
         });
         if (!loan) return { ok: false as const, error: "NOT_FOUND" as const };
 
@@ -435,6 +504,10 @@ export const financeLoanService = {
         const entryIds = (payments as Array<{ entryId: number | null }>)
           .map((p) => p.entryId)
           .filter((v): v is number => typeof v === "number");
+
+        if (loan.entryId) {
+          entryIds.push(loan.entryId);
+        }
 
         if (payments.length > 0) {
           await txAny.financeLoanPayment.updateMany({

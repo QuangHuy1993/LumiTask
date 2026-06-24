@@ -142,6 +142,8 @@ export function FinanceLoansClientImpl({
       {formOpen && (
         <FinanceLoanFormModal
           mode={formMode}
+          wallets={wallets}
+          categories={categories}
           initial={
             formTarget
               ? {
